@@ -62,6 +62,10 @@ class AlkaliAtom(Hydrogen):
         Returns:
         None
         """
+
+        # use get_multipole_me with cacheing, apply decorator here to avoid memory leaks between instances
+        self.get_multipole_me = self._get_multipole_me#functools.lru_cache(maxsize=None)(self._get_multipole_me)
+
         self.cpp_numerov = cpp_numerov
         
         if self.cpp_numerov:

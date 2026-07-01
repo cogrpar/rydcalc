@@ -68,6 +68,10 @@ class Hydrogen:
         """
         Initialize a Hydrogen atom instance.
         """
+
+        # use get_multipole_me with cacheing
+        self.get_multipole_me = self._get_multipole_me#functools.lru_cache(maxsize=None)(self._get_multipole_me)
+
         #self.dbm = db_manager('master_db.db')
         
         self.mass_kg = cs.physical_constants['atomic mass constant'][0] * self.mass
@@ -503,7 +507,7 @@ class Hydrogen:
         return float(diam)
     
     #@functools.lru_cache(maxsize=2048)
-    def get_multipole_me(self, st, other, k=1, qIn=None, operator=None):
+    def _get_multipole_me(self, st, other, k=1, qIn=None, operator=None, pre_computed_mes=None):
         """ 
         Calculate the multipole matrix element between two states. Note that this only considers the matrix element from the _outer_
         electron.
@@ -519,6 +523,16 @@ class Hydrogen:
         The multipole matrix element between the initial and final states.
         The answer is in atomic units, e*a0**k.
         """
+
+        # MODIFICATION: if applicable look in pre-calculated matrix elements hash table
+        key = (st.__hash__(), other.__hash__()) # states are hashable
+        if pre_computed_mes:
+            if key in pre_computed_mes.keys():
+                print(f'{st.atom.name} cache hit on ({st.__hash__()}, {other.__hash__()})')
+                return pre_computed_mes[key]
+            else:
+                print(f'{st.atom.name} cache miss on ({st.__hash__()}, {other.__hash__()})')
+
 
         if qIn is None:
             qIn = np.arange(-k, k + 1)

@@ -29,10 +29,9 @@ class pair:
                             
 
 class pair_basis:
-    class pair_basis:
-        """
-        A class to manage a basis of pair states for calculations involving interactions between pairs of states.
-        """
+    """
+    A class to manage a basis of pair states for calculations involving interactions between pairs of states.
+    """
     
     def __init__(self):
         self.pairs = []
@@ -202,7 +201,7 @@ class pair_basis:
         self.highlight.append((p1,sym,p2,vec))
         
 
-    def computeHamiltonians(self, multipoles=[[1,1]]):
+    def computeHamiltonians(self, multipoles=[[1,1]], a1_precomputed_me=None, a2_precomputed_me=None):
         """
         Compute the Hamiltonians for the system considering the specified multipoles.
 
@@ -246,7 +245,7 @@ class pair_basis:
 
         self._compute_HBz()
         self._compute_HBdiam()
-        self._compute_HEz_Hint_fast()
+        self._compute_HEz_Hint_fast(a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
         
     def _compute_HBz(self):
         """ Compute the Zeeman Hamiltonian. """
@@ -359,6 +358,10 @@ class pair_basis:
         
                             if me != 0  and printDebug:
                                 print(pii, "<-(",qtot,mm,")-> ", pjj)
+
+            # used this to characterize speedup seen when caching get_multipole_me results
+            #cache_info = pii.s1.get_multipole_me.cache_info()
+            #print(f'Cache info for state {pii.s1}: {cache_info}')
         
         # since we only did upper-right triangle, add transposed version
         self.HEz = self.HEz + np.conjugate(np.transpose(self.HEz))
@@ -367,7 +370,7 @@ class pair_basis:
             for qidx in range(len(HInt)):
                 HInt[qidx] = HInt[qidx] + np.conjugate(np.transpose(HInt[qidx])) - np.diagflat(np.diagonal(HInt[qidx]))
     
-    def _compute_HEz_Hint_fast(self):
+    def _compute_HEz_Hint_fast(self, a1_precomputed_me=None, a2_precomputed_me=None):
         """ This fast version of computing HEz and Hint works by iterating over the pair basis
         in blocks grouped by the first state, s1. For each block, we check if the required
         s1 transition is allowed (ie, dipole-dipole in the case we are considering [1,1] multipole).
@@ -447,8 +450,8 @@ class pair_basis:
                                     qtot = int(q1+q2)
                                     qidx = qtot + (mm[0] + mm[1]) #index for HInt arr.
 
-                                    d1 = pii.s1.get_multipole_me(pjj.s1,k=mm[0])
-                                    d2 = pii.s2.get_multipole_me(pjj.s2,k=mm[1])
+                                    d1 = pii.s1.get_multipole_me(pjj.s1,k=mm[0], pre_computed_mes=a1_precomputed_me)
+                                    d2 = pii.s2.get_multipole_me(pjj.s2,k=mm[1], pre_computed_mes=a2_precomputed_me)
 
                                     #cg = CG(mm[0],q1,mm[1],q2,mm[0]+mm[1],q1+q2).doit().evalf()
                                     cg = CG(mm[0],q1,mm[1],q2,mm[0]+mm[1],q1+q2)
@@ -462,6 +465,11 @@ class pair_basis:
                                     if me != 0  and printDebug:
                                         print(pii, "<-(",qtot,mm,")-> ", pjj)
 
+                            # used this to characterize speedup seen when caching get_multipole_me results
+                            #cache_info = self.pairs[ii].s1.atom.get_multipole_me.cache_info()
+                            #if cache_info.hits > 0 :
+                            #    print(f'Cache info for state {self.pairs[ii]}: {cache_info}')
+
 
         # since we only did upper-right triangle, add transposed version
         self.HEz = self.HEz + np.conjugate(np.transpose(self.HEz))
@@ -473,7 +481,7 @@ class pair_basis:
                 
         
         
-    def computeHtot(self,env,rum,th=np.pi/2,phi=0,interactions=True,multipoles=None):
+    def computeHtot(self,env,run,th=np.pi/2,phi=0,interactions=True,multipoles=None):
         """ this computes the eigenvalues of the total hamiltonian for environment
         specified in env (E,B, etc.), for two atoms with relative axis (r,th,phi).
         
@@ -514,7 +522,7 @@ class pair_basis:
                 
                 dq_max = mm[0] + mm[1]
                 for qidx in range(len(HInt)):
-                    self.HIntAll += HInt[qidx]*self.interaction_prefactor(qidx-dq_max,rum,th,phi,mm=mm)
+                    self.HIntAll += HInt[qidx]*self.interaction_prefactor(qidx-dq_max,run,th,phi,mm=mm)
             
             self.Htot += self.HIntAll
         

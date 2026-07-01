@@ -764,7 +764,7 @@ class Ytterbium171(AlkalineAtom):
         #energyexpHz is the binding energy with respect to the upper hyperfine threshold
         if tt == 'vlfm' and len(qn) == 4:
 
-            n = qn[0]
+            #n = qn[0]
             v = qn[0]
             l = qn[1]
             f = qn[2]

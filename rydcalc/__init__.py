@@ -18,3 +18,5 @@ from .utils import *
 
 from .rydcalc import *
 from .analysis import *
+
+from .pre_computation import *

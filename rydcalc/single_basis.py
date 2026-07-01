@@ -3,6 +3,8 @@ import numpy as np
 from .utils import *
 from .constants import *
 
+from functools import lru_cache
+
 class model_potential:
     """
     Class to represent model potential for use in python numerov wavefunction calculations.
@@ -330,7 +332,8 @@ class state_mqdt:
         else:
             return False
 
-    def get_multipole_me(self,other,k=1,qIn=None,operator=None):
+    #@lru_cache(maxsize=None)
+    def get_multipole_me(self,other,k=1,qIn=None,operator=None,pre_computed_mes=None):
         """ get multipole matrix element between these states. polarization is implicit.
         argument is final state, self is initial state.
         qIn is optional argument restricting polarization (will return 0 otherwise)
@@ -340,7 +343,7 @@ class state_mqdt:
         # if not self.allowed_multipole(other,k=k,qIn=qIn):
         #     return 0
         
-        return self.atom.get_multipole_me(self,other,k=k,qIn=qIn,operator=operator)
+        return self.atom.get_multipole_me(self,other,k=k,qIn=qIn,operator=operator,pre_computed_mes=pre_computed_mes)
         
         
 class state(state_mqdt):
