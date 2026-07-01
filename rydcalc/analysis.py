@@ -302,7 +302,7 @@ class analysis_pair_interaction(analysis):
             self.s2 = s2
             
         if pb is None:
-            self.pb = pair_basis_pre_computation()
+            self.pb = pair_basis()
             self.pb.fill(pair(self.s1,self.s2),include_opts=self.opts)
 
             print("Basis size: " + str(len(self.pb.pairs)))

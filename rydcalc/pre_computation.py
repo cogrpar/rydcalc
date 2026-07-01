@@ -109,7 +109,7 @@ Another (better) option is to use diskcache while calculating only the matrix
 elements that will be explicitly needed in computing the Hamiltonian
 '''
 
-cache = Cache('multipole_matrix_elements')
+cache = Cache('cached_matrix_elements')
 
 class pair_basis_pre_computation(pair_basis):
     def __init__(self):
@@ -124,22 +124,7 @@ class pair_basis_pre_computation(pair_basis):
         if key in cache:
             return cache[key]
         
-        print('Cache miss!!')
         me = initial_state.get_multipole_me(final_state, k=k, qIn=qIn, operator=operator, pre_computed_mes=pre_computed_mes)
-        cache[key] = me
-        return me
-    
-    @staticmethod
-    def cached_magnetic_me(initial_state, final_state):
-        # wraper for state.atom.get_magnetic_me that caches the result using diskcache
-
-        key = ('magnetic_me', str(initial_state), str(final_state))
-
-        if key in cache:
-            return cache[key]
-        
-        print('Cache miss!!')
-        me = initial_state.atom.get_magnetic_me(initial_state, final_state)
         cache[key] = me
         return me
     
@@ -152,7 +137,6 @@ class pair_basis_pre_computation(pair_basis):
         if key in cache:
             return cache[key]
         
-        print('Cache miss!!')
         me = initial_state.atom.diamagnetic_int(final_state, initial_state)
         cache[key] = me
         return me
@@ -320,7 +304,7 @@ class pair_basis_pre_computation(pair_basis):
         return
 
     def computeHamiltonians(self, multipoles=[[1,1]], a1_precomputed_me=None, a2_precomputed_me=None):
-        # override to utilize ...
+        # override to utilize parallelization
         
         self.multipoles = multipoles
 
@@ -366,13 +350,13 @@ class pair_basis_pre_computation(pair_basis):
         self._compute_HEz_Hint_fast(a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
 
         p_HBz.join()
+        p_HBdiam.join()
+
         np.copyto(self.HBz, shared_HBz)
 
         sh_mem_HBz.close()
         sh_mem_HBz.unlink()
 
-        # this usually takes longer to finish do don't bother joining until after cleaning up p_HBz
-        p_HBdiam.join()
         np.copyto(self.HBdiam, shared_HBdiam)
 
         sh_mem_HBdiam.close()
