@@ -498,7 +498,6 @@ class analysis_pair_interaction(analysis):
         axs[-1].set_axisbelow(True)
         
         return fig,axs # to allow later figure modification
-            
     
         
         

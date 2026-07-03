@@ -13,7 +13,7 @@ from .single_basis import *
 from .pair_basis import *
 
 import multiprocessing as mp
-mp.set_start_method("fork")
+mp.set_start_method('fork')
 
 
 
@@ -109,14 +109,20 @@ Another (better) option is to use diskcache while calculating only the matrix
 elements that will be explicitly needed in computing the Hamiltonian
 '''
 
-cache = Cache('cached_matrix_elements')
+_cache = None
+
+def get_cache():
+    global _cache
+    if _cache is None:
+        _cache = Cache('cached_matrix_elements')
+    return _cache
 
 class pair_basis_pre_computation(pair_basis):
     def __init__(self):
         super().__init__()
 
     @staticmethod
-    def cached_multipole_me(initial_state, final_state, k=1, qIn=None, operator=None, pre_computed_mes=None):
+    def cached_multipole_me(cache, initial_state, final_state, k=1, qIn=None, operator=None, pre_computed_mes=None):
         # wrapper for state.get_multipole_me that caches the result using diskcache
         
         key = ('multipole_me', str(initial_state), str(final_state), k, qIn)
@@ -129,7 +135,7 @@ class pair_basis_pre_computation(pair_basis):
         return me
     
     @staticmethod
-    def cached_magnetic_int(final_state, initial_state):
+    def cached_magnetic_int(cache, final_state, initial_state):
         # wraper for state.atom.diamagnetic_int that caches the result using diskcache
 
         key = ('diamagnetic_int', str(final_state), str(initial_state))
@@ -140,13 +146,27 @@ class pair_basis_pre_computation(pair_basis):
         me = initial_state.atom.diamagnetic_int(final_state, initial_state)
         cache[key] = me
         return me
+    
+    @staticmethod
+    def cached_magnetic_me(cache, initial_state, final_state):
+        # wrapper for state.atom.get_magnetic_me that caches the result using diskcache
+
+        key = ('magnetic_me', str(initial_state), str(final_state))
+
+        if key in cache:
+            return cache[key]
+        
+        me = initial_state.atom.get_magnetic_me(final_state, initial_state)
+        cache[key] = me
+        return me
 
     def _compute_HEz_Hint_fast(self, a1_precomputed_me=None, a2_precomputed_me=None):
         # override to utilize cached_multipole_me
         # must be called from computeHamiltonians or certain class attributes will not be instantiated
+
+        cache = get_cache()
         
         printDebug = False
-        computeHInt = True
         
         # generate a list of all unique states s1
         unique_s1 = list(set([p.s1 for p in self.pairs]))
@@ -181,10 +201,10 @@ class pair_basis_pre_computation(pair_basis):
                             pjj = self.pairs[jj]
                             
                             if (not s1_same) and pii.s2 == pjj.s2:
-                                self.HEz[ii,jj] += pair_basis_pre_computation.cached_multipole_me(pii.s1, pjj.s1, qIn=(0,), k=1)
+                                self.HEz[ii,jj] += pair_basis_pre_computation.cached_multipole_me(cache, pii.s1, pjj.s1, qIn=(0,), k=1)
                              
                             if s1_same and pii.s2.allowed_multipole(pjj.s2,k=1,qIn=(0,)):
-                                self.HEz[ii,jj] += pair_basis_pre_computation.cached_multipole_me(pii.s2, pjj.s2, qIn=(0,), k=1)
+                                self.HEz[ii,jj] += pair_basis_pre_computation.cached_multipole_me(cache, pii.s2, pjj.s2, qIn=(0,), k=1)
 
 
                 # now look at interactions
@@ -212,8 +232,8 @@ class pair_basis_pre_computation(pair_basis):
                                     qtot = int(q1+q2)
                                     qidx = qtot + (mm[0] + mm[1]) #index for HInt arr.
 
-                                    d1 = pair_basis_pre_computation.cached_multipole_me(pii.s1, pjj.s1, k=mm[0], pre_computed_mes=a1_precomputed_me)
-                                    d2 = pair_basis_pre_computation.cached_multipole_me(pii.s2, pjj.s2, k=mm[1], pre_computed_mes=a2_precomputed_me)
+                                    d1 = pair_basis_pre_computation.cached_multipole_me(cache, pii.s1, pjj.s1, k=mm[0], pre_computed_mes=a1_precomputed_me)
+                                    d2 = pair_basis_pre_computation.cached_multipole_me(cache, pii.s2, pjj.s2, k=mm[1], pre_computed_mes=a2_precomputed_me)
 
                                     #cg = CG(mm[0],q1,mm[1],q2,mm[0]+mm[1],q1+q2).doit().evalf()
                                     cg = CG(mm[0],q1,mm[1],q2,mm[0]+mm[1],q1+q2)
@@ -235,44 +255,83 @@ class pair_basis_pre_computation(pair_basis):
                 HInt[qidx] = HInt[qidx] + np.conjugate(np.transpose(HInt[qidx])) - np.diagflat(np.diagonal(HInt[qidx]))
 
     def _compute_HBdiam(self, shm_name=None, shared_H_shape=None, shared_H_dtype=None):
-        # override to utilize cached_multipole_me
+        start = time.perf_counter()
+
+        # override to utilize cached multipole/magnetic matrix elements
         # must be called from computeHamiltonians or certain class attributes will not be instantiated
 
-        # optionally use shared memory so the func can be called on a separate process
+        cache = get_cache()
 
+        # optionally use shared memory so the func can be called on a separate process
         existing_shm = None
         HBdiam = None
 
         if shm_name:
             existing_shm = shared_memory.SharedMemory(name=shm_name)
             HBdiam = np.ndarray(shared_H_shape, dtype=shared_H_dtype, buffer=existing_shm.buf)
+        else:
+            HBdiam = self.HBdiam
 
-        # if we do, put in off-diagonal matrix elements as well
-        # NB: this might fail for interactions between MQDT and non-MQDT, because we don't have get_magnetic_me defined for non-MQDT states.
-        for ii in range(self.dim()):
-            for jj in range(self.dim()):
+        # cache access optimized in following loops
 
-                pii = self.pairs[ii]
-                pjj = self.pairs[jj]
+        pairs = self.pairs
+        dim = len(pairs)
 
-                if pii.s2 == pjj.s2:
-                    HBdiam[ii, jj] += pair_basis_pre_computation.cached_magnetic_int(self.pairs[ii].s1, self.pairs[jj].s1)
+        # pre-extract state references (major speedup: avoids repeated attribute lookup)
+        s1_list = [p.s1 for p in pairs]
+        s2_list = [p.s2 for p in pairs]
 
-                if pii.s1 == pjj.s1:
-                    HBdiam[ii, jj] += pair_basis_pre_computation.cached_magnetic_int(self.pairs[ii].s2, self.pairs[jj].s2)
+        for ii in range(dim):
+            s1_i = s1_list[ii]
+            s2_i = s2_list[ii]
 
+            HBii = HBdiam[ii]  # local row reference (minor micro-opt)
+
+            for jj in range(dim):
+                s1_j = s1_list[jj]
+                s2_j = s2_list[jj]
+
+                val = 0.0
+
+                # interaction via s2 match
+                if s2_i == s2_j:
+                    val += pair_basis_pre_computation.cached_magnetic_int(
+                        cache, s1_i, s1_j
+                    )
+
+                # interaction via s1 match
+                if s1_i == s1_j:
+                    val += pair_basis_pre_computation.cached_magnetic_int(
+                        cache, s2_i, s2_j
+                    )
+
+                if val != 0:
+                    HBii[jj] += val
+
+        # cleanup shared memory if used
         if existing_shm:
             existing_shm.close()
+
+        stop = time.perf_counter()
+        print(f'computed HBdiam in {stop - start} s')
         return
     
     def _compute_HBz(self, shm_name=None, shared_H_shape=None, shared_H_dtype=None):
-        # override to optionally use shared memory so the func can be called on a separate process
+        start = time.perf_counter()
+        # override to utilize cached_multipole_me
+        # must be called from computeHamiltonians or certain class attributes will not be instantiated
+
+        cache = get_cache()
+
+        # optionally use shared memory so the func can be called on a separate process
         existing_shm = None
         HBz = None
 
         if shm_name:
             existing_shm = shared_memory.SharedMemory(name=shm_name)
             HBz = np.ndarray(shared_H_shape, dtype=shared_H_dtype, buffer=existing_shm.buf)
+        else:
+            HBz = self.HBz
 
         
         # if we don't have an MQDT model, can just enter diagonal matrix elements
@@ -282,25 +341,39 @@ class pair_basis_pre_computation(pair_basis):
                 
             if existing_shm:
                 existing_shm.close()
+
+            stop = time.perf_counter()
+            print(f'computed HBz in {stop - start} s')
             return
     
         # if we do, put in off-diagonal matrix elements as well
         # NB: this might fail for interactions between MQDT and non-MQDT, because we don't have get_magnetic_me defined for non-MQDT states.
-        for ii in range(self.dim()):
-            for jj in range(self.dim()):
-                
-                pii = self.pairs[ii]
-                pjj = self.pairs[jj]
-                
-                if pii.s2 == pjj.s2:
-                    HBz[ii,jj] += pii.s1.atom.get_magnetic_me(self.pairs[ii].s1,self.pairs[jj].s1)
-                    
-                if pii.s1 == pjj.s1:
-                    HBz[ii,jj] += pii.s2.atom.get_magnetic_me(self.pairs[ii].s2,self.pairs[jj].s2)
+        
+        # MODIFICATION: compute single atom magnetic hamiltonians and combine
+        # HBz = HBz1 x I + I x HBz2
+        
+        atom1_states = self.sb1.states
+        atom2_states = self.sb2.states
+
+        H1 = np.zeros((len(atom1_states), len(atom1_states)))
+
+        for i, si in enumerate(atom1_states):
+            for j, sj in enumerate(atom1_states):
+                H1[i, j] = pair_basis_pre_computation.cached_magnetic_me(cache, si, sj)
+
+        H2 = np.zeros((len(atom2_states), len(atom2_states)))
+
+        for i, si in enumerate(atom2_states):
+            for j, sj in enumerate(atom2_states):
+                H2[i, j] = pair_basis_pre_computation.cached_magnetic_me(cache, si, sj)
+
+        HBz = np.kron(H1, np.eye(len(atom2_states))) + np.kron(np.eye(len(atom1_states)), H2)
         
         if existing_shm:
             existing_shm.close()
 
+        stop = time.perf_counter()
+        print(f'computed HBz in {stop - start} s')
         return
 
     def computeHamiltonians(self, multipoles=[[1,1]], a1_precomputed_me=None, a2_precomputed_me=None):
@@ -337,9 +410,12 @@ class pair_basis_pre_computation(pair_basis):
             
 
         # first, compue H0 and HBz, which are diagonal
+        start = time.perf_counter()
         for ii in range(Nb):
             self.H0[ii,ii] = self.pairs[ii].energy_Hz - self.p0.energy_Hz
             #self.HBz[ii,ii] = self.pairs[ii].s1.get_g()*self.pairs[ii].s1.m + self.pairs[ii].s2.get_g()*self.pairs[ii].s2.m
+        stop = time.perf_counter()
+        print(f'computed diagonal elements in {stop - start} s')
 
         p_HBz = Process(target=self._compute_HBz, args=(sh_mem_HBz.name, self.HBz.shape, self.HBz.dtype))
         p_HBz.start()
@@ -347,7 +423,10 @@ class pair_basis_pre_computation(pair_basis):
         p_HBdiam = Process(target=self._compute_HBdiam, args=(sh_mem_HBdiam.name, self.HBdiam.shape, self.HBdiam.dtype))
         p_HBdiam.start()
 
+        start = time.perf_counter()
         self._compute_HEz_Hint_fast(a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
+        stop = time.perf_counter()
+        print(f'computed HEz and Hint in {stop - start} s')
 
         p_HBz.join()
         p_HBdiam.join()

@@ -1,5 +1,6 @@
 *.ipynb
 !tutorial.ipynb
+!optimization.ipynb
 *.db
 *.so
 *.o
@@ -9,3 +10,5 @@
 *.npy
 *.pyc
 .DS_Store
+*.json
+cached_matrix_elements
