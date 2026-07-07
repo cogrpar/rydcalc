@@ -376,7 +376,7 @@ class pair_basis_pre_computation(pair_basis):
         print(f'computed HBz in {stop - start} s')
         return
 
-    def computeHamiltonians(self, multipoles=[[1,1]], a1_precomputed_me=None, a2_precomputed_me=None):
+    def computeHamiltonians(self, multipoles=[[1,1]], a1_precomputed_me=None, a2_precomputed_me=None, parallel=False):
         # override to utilize parallelization
         
         self.multipoles = multipoles
@@ -388,13 +388,14 @@ class pair_basis_pre_computation(pair_basis):
         self.HBdiam = np.zeros((Nb,Nb))
         self.H0 = np.zeros((Nb,Nb))
 
-        sh_mem_HBz = shared_memory.SharedMemory(create=True, size=self.HBz.nbytes)
-        shared_HBz = np.ndarray(self.HBz.shape, dtype=self.HBz.dtype, buffer=sh_mem_HBz.buf)
-        np.copyto(shared_HBz, self.HBz)
+        if parallel:
+            sh_mem_HBz = shared_memory.SharedMemory(create=True, size=self.HBz.nbytes)
+            shared_HBz = np.ndarray(self.HBz.shape, dtype=self.HBz.dtype, buffer=sh_mem_HBz.buf)
+            np.copyto(shared_HBz, self.HBz)
 
-        sh_mem_HBdiam = shared_memory.SharedMemory(create=True, size=self.HBdiam.nbytes)
-        shared_HBdiam = np.ndarray(self.HBdiam.shape, dtype=self.HBdiam.dtype, buffer=sh_mem_HBdiam.buf)
-        np.copyto(shared_HBdiam, self.HBdiam)
+            sh_mem_HBdiam = shared_memory.SharedMemory(create=True, size=self.HBdiam.nbytes)
+            shared_HBdiam = np.ndarray(self.HBdiam.shape, dtype=self.HBdiam.dtype, buffer=sh_mem_HBdiam.buf)
+            np.copyto(shared_HBdiam, self.HBdiam)
         
         # HInt is 5xNxN, where the first index is the total change
         # in magnetic quantum number. Keeping track of it this way allows
@@ -417,29 +418,38 @@ class pair_basis_pre_computation(pair_basis):
         stop = time.perf_counter()
         print(f'computed diagonal elements in {stop - start} s')
 
-        p_HBz = Process(target=self._compute_HBz, args=(sh_mem_HBz.name, self.HBz.shape, self.HBz.dtype))
-        p_HBz.start()
+        if parallel:
+            p_HBz = Process(target=self._compute_HBz, args=(sh_mem_HBz.name, self.HBz.shape, self.HBz.dtype))
+            p_HBz.start()
 
-        p_HBdiam = Process(target=self._compute_HBdiam, args=(sh_mem_HBdiam.name, self.HBdiam.shape, self.HBdiam.dtype))
-        p_HBdiam.start()
+            p_HBdiam = Process(target=self._compute_HBdiam, args=(sh_mem_HBdiam.name, self.HBdiam.shape, self.HBdiam.dtype))
+            p_HBdiam.start()
 
-        start = time.perf_counter()
-        self._compute_HEz_Hint_fast(a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
-        stop = time.perf_counter()
-        print(f'computed HEz and Hint in {stop - start} s')
+            start = time.perf_counter()
+            self._compute_HEz_Hint_fast(a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
+            stop = time.perf_counter()
+            print(f'computed HEz and Hint in {stop - start} s')
 
-        p_HBz.join()
-        p_HBdiam.join()
+            p_HBz.join()
+            p_HBdiam.join()
 
-        np.copyto(self.HBz, shared_HBz)
+            np.copyto(self.HBz, shared_HBz)
 
-        sh_mem_HBz.close()
-        sh_mem_HBz.unlink()
+            sh_mem_HBz.close()
+            sh_mem_HBz.unlink()
 
-        np.copyto(self.HBdiam, shared_HBdiam)
+            np.copyto(self.HBdiam, shared_HBdiam)
 
-        sh_mem_HBdiam.close()
-        sh_mem_HBdiam.unlink()
+            sh_mem_HBdiam.close()
+            sh_mem_HBdiam.unlink()
+
+        else:
+            start = time.perf_counter()
+            self._compute_HEz_Hint_fast(a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
+            stop = time.perf_counter()
+            print(f'computed HEz and Hint in {stop - start} s')
+            self._compute_HBz()
+            self._compute_HBdiam()
 
         return
         
