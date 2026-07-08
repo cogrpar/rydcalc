@@ -338,6 +338,8 @@ class analysis_pair_interaction(analysis):
             [c6d, c6e, c3d, c3d] vector of fitted interaction coefficients for the desired pair states, in units of Hz*um^6 and Hz*um^3 as appropriate.
         """
         
+        total_start = time.perf_counter()
+
         self.env = environment(Bz_Gauss = Bz_Gauss, Ez_Vcm = Ez_Vcm, diamagnetism = diamagnetism)
 
         self.rList_um = rList_um
