@@ -337,40 +337,23 @@ class pair_basis_pre_computation(pair_basis):
         # if we don't have an MQDT model, can just enter diagonal matrix elements
         if (not isinstance(self.pairs[0].s1,state_mqdt)) or (not isinstance(self.pairs[0].s2,state_mqdt)):
             for ii in range(self.dim()):
-                HBz[ii,ii] = self.pairs[ii].s1.get_g()*self.pairs[ii].s1.m + self.pairs[ii].s2.get_g()*self.pairs[ii].s2.m
+                self.HBz[ii,ii] = self.pairs[ii].s1.get_g()*self.pairs[ii].s1.m + self.pairs[ii].s2.get_g()*self.pairs[ii].s2.m
                 
-            if existing_shm:
-                existing_shm.close()
-
-            stop = time.perf_counter()
-            print(f'computed HBz in {stop - start} s')
             return
     
         # if we do, put in off-diagonal matrix elements as well
         # NB: this might fail for interactions between MQDT and non-MQDT, because we don't have get_magnetic_me defined for non-MQDT states.
-        
-        # MODIFICATION: compute single atom magnetic hamiltonians and combine
-        # HBz = HBz1 x I + I x HBz2
-        
-        atom1_states = self.sb1.states
-        atom2_states = self.sb2.states
-
-        H1 = np.zeros((len(atom1_states), len(atom1_states)))
-
-        for i, si in enumerate(atom1_states):
-            for j, sj in enumerate(atom1_states):
-                H1[i, j] = pair_basis_pre_computation.cached_magnetic_me(cache, si, sj)
-
-        H2 = np.zeros((len(atom2_states), len(atom2_states)))
-
-        for i, si in enumerate(atom2_states):
-            for j, sj in enumerate(atom2_states):
-                H2[i, j] = pair_basis_pre_computation.cached_magnetic_me(cache, si, sj)
-
-        HBz = np.kron(H1, np.eye(len(atom2_states))) + np.kron(np.eye(len(atom1_states)), H2)
-        
-        if existing_shm:
-            existing_shm.close()
+        for ii in range(self.dim()):
+            for jj in range(self.dim()):
+                
+                pii = self.pairs[ii]
+                pjj = self.pairs[jj]
+                
+                if pii.s2 == pjj.s2:
+                    self.HBz[ii,jj] += pii.s1.atom.get_magnetic_me(self.pairs[ii].s1,self.pairs[jj].s1)
+                    
+                if pii.s1 == pjj.s1:
+                    self.HBz[ii,jj] += pii.s2.atom.get_magnetic_me(self.pairs[ii].s2,self.pairs[jj].s2)
 
         stop = time.perf_counter()
         print(f'computed HBz in {stop - start} s')

@@ -6,6 +6,7 @@ from .analysis import *
 
 import h5py
 from pathlib import Path
+from collections import deque
 from multiprocess import Pool
 from filelock import FileLock
 import math
@@ -43,7 +44,7 @@ def fix_libs():
         scipy.special.sph_harm = _patched_sph_harm
 
 class rydberg_pair_search:
-    def __init__(self, atom1, atom2, a1_n_range, a2_n_range, Bz_range, opts, save_file):
+    def __init__(self, atom1, atom2, a1_n_range, a2_n_range, Bz_range, opts, opts_intraspecies=None, save_file='search_results.h5', logs_folder='search_logs', on_cluster=False):
         # INPUTS
         # - atom1: the first atom in the dual species array
         # - atom2: the second atom in the dual species array
@@ -61,12 +62,15 @@ class rydberg_pair_search:
         self.a2_n_range = a2_n_range
         self.Bz_range = Bz_range
         self.opts = opts
+        self.opts_intraspecies = opts_intraspecies
         self.save_file = save_file
+        
+        if on_cluster:
+            self.allocated_cpus = min(int(os.environ.get('SLURM_CPUS_PER_TASK', 1)), 25)
+        else:
+            self.allocated_cpus = None # let multiprocess use the number of available cores
 
         self.dual_species = (self.atom1 != self.atom2)
-
-        if Path(self.save_file).is_file():
-            print('warning: save file aready exists. search may fail to overwrite previous data')
 
         # generate a full list of possible states within the provided range for atom 1
         self.a1_states = []
@@ -144,13 +148,27 @@ class rydberg_pair_search:
 
             state = self.atom2.get_state(tuple(qns))
 
-        # create the logs folder
-        # delete the folder if it exists
-        if os.path.exists('search_logs'):
-            shutil.rmtree('search_logs')
+        
+        # create the logs folder if it doesn't exist
+        os.makedirs(logs_folder, exist_ok=True)
 
-        # recreate the empty folder
-        os.makedirs('search_logs', exist_ok=True)
+        # get a list of completed calculations by looking through the logs
+        self.completed_calculations = []
+
+        for file_path in Path(logs_folder).iterdir():
+            # check if it is a file
+            if file_path.is_file():
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    # keep only the last line in memory
+                    last_line_list = deque(f, maxlen=1)
+                    
+                    # convert the line to a string
+                    if last_line_list:
+                        last_line = last_line_list[0].strip()
+                        if last_line[0] == '*':
+                            self.completed_calculations.append(last_line_list[0].strip()[1:])
+
+        print(self.completed_calculations)
 
     def generate_search_space(self, num_atomic_configs, num_field_configs):
         # generates an atom1-atom2 search space with shape (num_atomic_configs, num_field_configs)
@@ -185,16 +203,22 @@ class rydberg_pair_search:
                             already_included_a2a2 = True
                             break
 
-                    if not already_included_a1a2:
+                    config = (self.a1_states[i], self.a2_states[j], field_value)
+                    if not already_included_a1a2 and not str(config) in self.completed_calculations:
                         # add atom1 atom2 interaction to search space
-                        self.search_space_a1a2.append((self.a1_states[i], self.a2_states[j], field_value))
+                        self.search_space_a1a2.append(config)
 
                     if self.dual_species:
+                        config11 = (self.a1_states[i], self.a1_states[i], field_value)
+                        config22 = (self.a2_states[j], self.a2_states[j], field_value)
                         # add atom1 and atom 2 intraspecies interaction to search space
-                        self.search_space_a1a1.add((self.a1_states[i], self.a1_states[i], field_value))
-                        self.search_space_a2a2.add((self.a2_states[j], self.a2_states[j], field_value))
+                        if not str(config11) in self.completed_calculations:
+                            self.search_space_a1a1.add(config11)
+
+                        if not str(config22) in self.completed_calculations:
+                            self.search_space_a2a2.add(config22)
     
-    def run_single(self, configuration):
+    def run_single(self, configuration, save_file):
         fix_libs()
 
         # redirect stdoutput to log file
@@ -212,16 +236,22 @@ class rydberg_pair_search:
             
             rList_um = np.arange(2, 10, 0.2)
 
+            # get the correct opts if this is an intraspecies calculation
+            if s1.atom.name == s2.atom.name and self.opts_intraspecies:
+                opts = self.opts_intraspecies
+            else:
+                opts = self.opts
+
             start = time.perf_counter()
             pb = pair_basis_pre_computation()
-            pb.fill(pair(s1, s2), include_opts=self.opts)
+            pb.fill(pair(s1, s2), include_opts=opts)
             pb.computeHamiltonians(multipoles=[[1,1]])
             end = time.perf_counter()
 
             print(f'Computed Hamiltonian in {end-start} s')
 
             start = time.perf_counter()
-            pair_int = analysis_pair_interaction(s1, s2, pb=pb, include_opts=self.opts)
+            pair_int = analysis_pair_interaction(s1, s2, pb=pb, include_opts=opts)
             result = pair_int.run(rList_um=rList_um, th=0, Bz_Gauss=Bz)
 
             fig,ax = pair_int.pa_plot(include_plot_opts={'ov_norm': 'log', 'log_norm': [0.01, 1]})
@@ -232,43 +262,41 @@ class rydberg_pair_search:
 
             # save the results
             start = time.perf_counter()
-            with FileLock(f'{self.save_file}.lock'):
-                with h5py.File(self.save_file, 'a') as h5_file:
+            with FileLock(f'{save_file}.lock'):
+                with h5py.File(save_file, 'a') as h5_file:
                     add_fig_to_h5(h5_file, fig, str(configuration), result)
             end = time.perf_counter()
 
             print(f'Saved results in {end-start} s')
+
+            # the last line in the log file should be the configuration to signal successful completion
+            print(f'*{configuration}')
         
         sys.stdout = original_stdout
     
     def run_search(self):
-        # run the search, calculating the 
+        # run the search over entire search space
 
         if self.search_space_a1a2 is None:
             print('Error, please define search space before running search')
             return
-        
-        save_file_bac = self.save_file
 
         # otherwise start the search, running different parts in parallel
         print('starting search...')
-        with Pool(processes=4, maxtasksperchild=5) as pool:
-            self.save_file = self.save_file.replace('.h5', '_interspecies.h5') if self.dual_species else self.save_file
-            pool.map(self.run_single, self.search_space_a1a2)
-        print(f'finished calculating {self.atom1.name}-{self.atom2.name} interactions')
         
         if self.dual_species:
-            self.save_file = self.save_file.replace('.h5', '_intraspecies_a1.h5')
-            with Pool(processes=4, maxtasksperchild=5) as pool:
-                pool.map(self.run_single, self.search_space_a1a1)
-            print(f'finished calculating {self.atom1.name}-{self.atom1.name} interactions')
-
-            self.save_file = self.save_file.replace('.h5', '_intraspecies_a2.h5')
-            with Pool(processes=4, maxtasksperchild=5) as pool:
-                pool.map(self.run_single, self.search_space_a2a2)
-            print(f'finished calculating {self.atom2.name}-{self.atom2.name} interactions')
-
-        self.save_file = save_file_bac
+            with Pool(processes=self.allocated_cpus, maxtasksperchild=5) as pool:
+                sf12 = self.save_file.replace('.h5', '_interspecies.h5')
+                sf11 = self.save_file.replace('.h5', '_intraspecies_a1.h5')
+                sf22 = self.save_file.replace('.h5', '_intraspecies_a2.h5')
+                search_args = [(config, sf12) for config in self.search_space_a1a2] + \
+                            [(config, sf11) for config in self.search_space_a1a1] + \
+                            [(config, sf22) for config in self.search_space_a2a2]
+                pool.starmap(self.run_single, search_args)
+        
+        else:
+            search_args = [(config, self.save_file) for config in self.search_space_a1a2]
+            pool.starmap(self.run_single, search_args)
         
 
 
