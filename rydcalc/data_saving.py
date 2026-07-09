@@ -8,8 +8,8 @@ from PIL import Image
 
 # saves fig and calculated interaction coefficients to h5 file
 def add_fig_to_h5(h5_file, fig, fig_name, coefficients):
-    if f'{fig_name}_coefficients' in f:
-        del f[f'{fig_name}_coefficients']
+    if f'{fig_name}_coefficients' in h5_file:
+        del h5_file[f'{fig_name}_coefficients']
 
     h5_file.create_dataset(
         f'{fig_name}_coefficients',
@@ -22,8 +22,8 @@ def add_fig_to_h5(h5_file, fig, fig_name, coefficients):
     fig.savefig(buf, format='png', bbox_inches='tight')
     binary_data =  np.frombuffer(buf.getvalue(), dtype=np.uint8)
 
-    if fig_name in f:
-        del f[fig_name]
+    if fig_name in h5_file:
+        del h5_file[fig_name]
 
     # add a dataset for the image and the coefficients
     h5_file.create_dataset(
