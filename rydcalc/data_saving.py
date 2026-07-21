@@ -8,7 +8,7 @@ from PIL import Image
 import dill
 
 # saves fig and calculated interaction coefficients to h5 file
-def add_fig_to_h5(h5_file, fig, fig_name, coefficients, opts):
+def add_fig_to_h5(h5_file, fig, fig_name, coefficients, opts, energies=None):
     if f'{fig_name}_coefficients' in h5_file:
         del h5_file[f'{fig_name}_coefficients']
 
@@ -25,7 +25,16 @@ def add_fig_to_h5(h5_file, fig, fig_name, coefficients, opts):
         f'{fig_name}_opts',
         data = np.void(opts_str),
     )
-   
+
+    if energies:
+        if f'{fig_name}_energies' in h5_file:
+            del h5_file[f'{fig_name}_energies']
+
+        h5_file.create_dataset(
+            f'{fig_name}_energies',
+            data = energies # allows for storing a list of relevant energies during a calculation
+        )
+
     # store figure image as pre-compressed byte-array
     buf = io.BytesIO()
 
@@ -44,7 +53,7 @@ def add_fig_to_h5(h5_file, fig, fig_name, coefficients, opts):
     )
 
 # load figure and calculated interaction coefficients from h5 file
-def load_fig_from_h5(h5_file, fig_name):
+def load_fig_from_h5(h5_file, fig_name, return_energies=False):
     coef_dataset = h5_file[f'{fig_name}_coefficients']
     coef_array = coef_dataset[:] # [c6d, c6e, c3d, c3d]
 
@@ -56,7 +65,8 @@ def load_fig_from_h5(h5_file, fig_name):
     image_stream = io.BytesIO(binary_data)
     fig = Image.open(image_stream)
 
-    return fig, coef_array , opts
+    if return_energies and f'{fig_name}_energies' in h5_file:
+        energies = h5_file['{fig_name}_energies'][:]
+        return fig, coef_array, opts, energies
 
-
-
+    return fig, coef_array, opts

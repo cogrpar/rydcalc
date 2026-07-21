@@ -1,6 +1,7 @@
 *.ipynb
 !tutorial.ipynb
 !optimization.ipynb
+!plotting.ipynb
 !search.ipynb
 *.db
 *.so

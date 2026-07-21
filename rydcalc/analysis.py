@@ -15,7 +15,6 @@ further introspection
 #from rydcalc import *
 from .single_basis import *
 from .pair_basis import *
-from .pre_computation import *
 
 from rydcalc import * # to get environment
 
@@ -265,7 +264,7 @@ class analysis_pair_interaction(analysis):
         evAll (list): List of all eigenvalues computed.
         en0 (float): The initial energy computed without interactions.
     """
-    def __init__(self,s1,s2=None,include_opts={},pb=None,multipoles=[[1,1]], a1_precomputed_me=None, a2_precomputed_me=None):
+    def __init__(self,s1,s2=None,include_opts={},pb=None,multipoles=[[1,1]]):
         """
         Initializes the analysis_pair_interaction class.
 
@@ -284,11 +283,6 @@ class analysis_pair_interaction(analysis):
             s2 (State): The second state in the pair.
             pb (pair_basis): The pair basis used for the calculations.
         """
-
-        # options:
-        # - dn is the change in the principle quantum number 
-        # - dl is change over angular momentum quantum number
-        # - dm is change over magnetic quantum number
         self.opts = {'dn': 2,'dl': 2,'dm': 1,'dipole_allowed': False}
         
         for k,v in include_opts.items():
@@ -302,12 +296,13 @@ class analysis_pair_interaction(analysis):
             self.s2 = s2
             
         if pb is None:
+        
             self.pb = pair_basis()
             self.pb.fill(pair(self.s1,self.s2),include_opts=self.opts)
 
             print("Basis size: " + str(len(self.pb.pairs)))
 
-            self.pb.computeHamiltonians(multipoles=multipoles, a1_precomputed_me=a1_precomputed_me, a2_precomputed_me=a2_precomputed_me)
+            self.pb.computeHamiltonians(multipoles=multipoles)
         else:
             # for convenience when developing, allow this to be passed in to skip computation
             self.pb = pb
@@ -338,8 +333,6 @@ class analysis_pair_interaction(analysis):
             [c6d, c6e, c3d, c3d] vector of fitted interaction coefficients for the desired pair states, in units of Hz*um^6 and Hz*um^3 as appropriate.
         """
         
-        total_start = time.perf_counter()
-
         self.env = environment(Bz_Gauss = Bz_Gauss, Ez_Vcm = Ez_Vcm, diamagnetism = diamagnetism)
 
         self.rList_um = rList_um
@@ -355,8 +348,9 @@ class analysis_pair_interaction(analysis):
     
         self.en0 = self.pb.computeHtot(self.env,0,th=self.th,phi=self.phi,interactions=False)[0,0]
     
-        for run in tqdm(self.rList_um, disable = silence):
-            ret = self.pb.computeHtot(self.env,run,th=self.th,phi=self.phi,interactions=True)
+        for rum in tqdm(self.rList_um, disable = silence):
+            
+            ret = self.pb.computeHtot(self.env,rum,th=self.th,phi=self.phi,interactions=True)
     
             self.energiesAll.append(self.pb.es - self.en0)
             self.evAll.append(self.pb.ev)
@@ -500,7 +494,7 @@ class analysis_pair_interaction(analysis):
         axs[-1].set_axisbelow(True)
         
         return fig,axs # to allow later figure modification
+            
     
         
         
-

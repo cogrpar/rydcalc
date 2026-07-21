@@ -8,14 +8,14 @@ import rydcalc
 # fix deprecated function calls for newer versions of numpy and scipy
 rydcalc.large_search.fix_libs()
 
-logs_folder = '/n/netscratch/giuliasemeghini_lab/Lab/yizhu/search_logs'     # TODO: change this to be some location in /n/scratch
-on_cluster = True                                                           # TODO: change to true 
-save_file = '/n/netscratch/giuliasemeghini_lab/Lab/yizhu/initial_search.h5' # TODO: change this to be some location in /n/scratch/
+logs_folder = './search_logs'     # TODO: change this to be some location in /n/scratch
+on_cluster = False                                                           # TODO: change to true 
+save_file = './initial_search.h5' # TODO: change this to be some location in /n/scratch/
 
 includefn = lambda p,p0: True if ((abs(p0.energy_Hz-p.energy_Hz)<2e9 ) and ((-1)**(p.s1.channels[0].l + p.s2.channels[0].l)==(-1)**(p0.s1.channels[0].l + p0.s2.channels[0].l))) else False
 
-opts_interspecies = {'dn': 5,'dl': 3,'dm': 3,'dipole_allowed': False, 'pair_include_fn': includefn}
-opts_intraspecies = {'dn': 4,'dl': 3,'dm': 3,'dipole_allowed': False, 'pair_include_fn': includefn} # because Yb is slow
+opts_interspecies = {'dn': 1,'dl': 3,'dm': 3,'dipole_allowed': False, 'pair_include_fn': includefn}
+opts_intraspecies = {'dn': 1,'dl': 3,'dm': 3,'dipole_allowed': False, 'pair_include_fn': includefn} # because Yb is slow
 
 Yb171 = rydcalc.Ytterbium171(cpp_numerov=True,use_db=False)
 Rb = rydcalc.Rubidium87(cpp_numerov=True,use_db=False)
@@ -23,8 +23,8 @@ Rb = rydcalc.Rubidium87(cpp_numerov=True,use_db=False)
 search = rydcalc.rydberg_pair_search(
     atom1 = Yb171, 
     atom2 = Rb, 
-    a1_n_range = [40, 65], # TODO, does this look like a good range?
-    a2_n_range = [40, 65], # TODO, does this look like a good range?
+    a1_n_range = [40, 70], # TODO, does this look like a good range?
+    a2_n_range = [40, 70], # TODO, does this look like a good range?
     Bz_range = [10, 10],   # TODO, does this look like a good range?
     opts = opts_interspecies, 
     opts_intraspecies = opts_intraspecies,
@@ -33,10 +33,14 @@ search = rydcalc.rydberg_pair_search(
     on_cluster = on_cluster
 )
 
-search.generate_search_space(num_atomic_configs = 250, num_field_configs = 1)
-print(len(search.search_space_a1a2)+len(search.search_space_a1a1)+len(search.search_space_a2a2))
+search.generate_search_space(num_atomic_configs = 10, num_Bz_field_configs = 1)
 #assert(len(search.search_space_a1a2) == len(search.search_space_a1a1) * len(search.search_space_a2a2))
+# print(len(search.a1_states))
+# print(len(search.a2_states))
+# print(len(search.search_space_a1a1[0]))
+# print(len(search.search_space_a2a2[0]))
 
 if __name__ == '__main__':
     search.run_search(channels=['a1a1'])
+    
 
